@@ -83,6 +83,100 @@ Exemplo de resposta:
   }
 }
 ```
+### Controle de permissões por perfil
+
+O sistema possui controle de acesso baseado no perfil do usuário autenticado.
+
+Perfis disponíveis:
+
+* `CLIENTE`
+* `ATENDENTE`
+* `GERENTE`
+* `ADMIN`
+
+Cada perfil possui permissões diferentes dentro da API.
+
+| Perfil      | Permissões principais                                                                   |
+| ----------- | --------------------------------------------------------------------------------------- |
+| `CLIENTE`   | Pode criar pedidos, consultar seus próprios pedidos e usar fidelidade                   |
+| `ATENDENTE` | Pode consultar e atualizar pedidos, processar pagamentos e auxiliar no atendimento      |
+| `GERENTE`   | Pode gerenciar unidades, produtos, estoque, pedidos, pagamentos, fidelidade e auditoria |
+| `ADMIN`     | Possui acesso completo ao sistema, incluindo usuários e operações administrativas       |
+
+Endpoints administrativos exigem autenticação via JWT e perfil compatível. Caso o usuário tente acessar uma funcionalidade sem permissão, a API retorna erro `403`.
+
+Exemplo de erro de permissão:
+
+```json
+{
+  "erro": "SEM_PERMISSAO",
+  "mensagem": "Usuário sem permissão para esta operação",
+  "status": 403,
+  "path": "/auditoria",
+  "timestamp": "2026-06-01T18:30:00"
+}
+```
+
+### Criação de usuário administrador
+
+Por segurança, o cadastro público de usuários deve ser usado inicialmente para criar um usuário com perfil comum, como `CLIENTE`.
+
+Exemplo:
+
+```json
+{
+  "nome": "Admin",
+  "email": "admin@gmail.com",
+  "senha": "123456",
+  "perfil": "CLIENTE",
+  "consentimento_lgpd": false
+}
+```
+
+Após criar o usuário pelo Swagger, é necessário alterar o perfil diretamente no banco de dados para liberar permissões administrativas.
+
+No pgAdmin, execute o comando abaixo:
+
+```sql
+UPDATE usuarios
+SET perfil = 'ADMIN'
+WHERE email = 'admin@gmail.com';
+```
+
+Depois, confirme a alteração:
+
+```sql
+SELECT id, nome, email, perfil
+FROM usuarios
+ORDER BY id ASC;
+```
+
+Com o perfil alterado para `ADMIN`, basta fazer login normalmente em:
+
+```text
+POST /auth/login
+```
+
+Exemplo:
+
+```json
+{
+  "email": "admin@gmail.com",
+  "senha": "123456"
+}
+```
+
+A resposta deve retornar o token JWT e o usuário com perfil `ADMIN`.
+
+Esse token deve ser usado para acessar endpoints protegidos, como:
+
+* `GET /usuarios`
+* `POST /unidades`
+* `POST /produtos`
+* `POST /estoque`
+* `GET /pagamentos`
+* `GET /auditoria`
+
 
 ### Unidades
 
@@ -424,16 +518,20 @@ A documentação Swagger permite testar todos os endpoints diretamente pelo nave
 
 Para testar o fluxo principal da aplicação, a ordem recomendada é:
 
-1. Criar usuário
-2. Criar unidade
-3. Criar produto
-4. Criar estoque
-5. Criar pedido
-6. Processar pagamento
-7. Consultar fidelidade
-8. Resgatar pontos
-9. Consultar auditoria
-10. Testar login JWT
+1. Criar um usuário pelo endpoint `POST /usuarios`
+2. Alterar o perfil desse usuário para `ADMIN` no banco de dados
+3. Fazer login em `POST /auth/login`
+4. Copiar o token JWT retornado
+5. Criar unidade com usuário `ADMIN`
+6. Criar produto com usuário `ADMIN`
+7. Criar estoque com usuário `ADMIN`
+8. Criar pedido
+9. Processar pagamento
+10. Consultar fidelidade
+11. Resgatar pontos
+12. Consultar auditoria
+13. Testar bloqueio de permissão com usuário `CLIENTE`
+
 
 ## Exemplos de testes realizados
 
@@ -546,6 +644,11 @@ O projeto inclui alguns cuidados básicos de segurança:
 - Campo de consentimento LGPD no cadastro do usuário.
 - Não retorno da senha nas respostas da API.
 - Registro de ações importantes por auditoria.
+- Controle de permissões por perfil de usuário.
+* Bloqueio de endpoints administrativos para usuários sem permissão.
+* Uso de usuário `ADMIN` para operações administrativas.
+* Usuários comuns podem ser cadastrados como `CLIENTE`.
+
 
 ## Observações sobre o pagamento mock
 
