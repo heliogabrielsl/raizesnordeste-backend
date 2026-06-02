@@ -1,8 +1,9 @@
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
+from jose import JWTError, jwt
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -45,6 +46,9 @@ STATUS_PEDIDO_VALIDOS = {
 STATUS_EXIGEM_PAGAMENTO = {"EM_PREPARO", "PRONTO", "ENTREGUE"}
 STATUS_SEM_PAGAMENTO_CONFIRMADO = {"CRIADO", "AGUARDANDO_PAGAMENTO", "PAGAMENTO_RECUSADO"}
 STATUS_PERMITIDOS_PAGAMENTO = {"CRIADO", "AGUARDANDO_PAGAMENTO", "PAGAMENTO_RECUSADO"}
+SECRET_KEY = "chave-secreta-api-raizes"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 
 # =========================
@@ -116,6 +120,120 @@ async def tratar_validacao(request: Request, exc: RequestValidationError):
 
 def calcular_offset(page: int, limit: int):
     return (page - 1) * limit
+
+def verificar_senha(senha_digitada: str, senha_hash: str):
+    try:
+        return bcrypt.verify(senha_digitada, senha_hash)
+    except Exception:
+        return False
+
+
+def criar_token_acesso(dados: dict):
+    dados_token = dados.copy()
+
+    expiracao = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    dados_token.update({
+        "exp": expiracao
+    })
+
+    token = jwt.encode(
+        dados_token,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+    return token
+
+
+def autenticar_usuario(db, email: str, senha: str):
+    usuario = db.query(models.Usuario).filter(
+        models.Usuario.email == email
+    ).first()
+
+    if not usuario:
+        raise HTTPException(
+            status_code=401,
+            detail="E-mail ou senha inválidos"
+        )
+
+    if not verificar_senha(senha, usuario.senha):
+        raise HTTPException(
+            status_code=401,
+            detail="E-mail ou senha inválidos"
+        )
+
+    return usuario
+
+
+def obter_usuario_logado(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    token: Optional[str] = None,
+    db=Depends(get_db)
+):
+    token_recebido = None
+
+    if authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Formato do token inválido"
+            )
+
+        token_recebido = authorization.replace("Bearer ", "")
+
+    elif token:
+        token_recebido = token
+
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Token não informado"
+        )
+
+    try:
+        payload = jwt.decode(
+            token_recebido,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        usuario_id = payload.get("sub")
+
+        if usuario_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Token inválido ou expirado"
+        )
+
+    usuario = buscar_usuario_db(db, int(usuario_id))
+
+    return usuario
+
+
+def perfil_usuario(usuario):
+    return (usuario.perfil or "").strip().upper()
+
+
+def exigir_perfil(usuario, perfis_permitidos: set):
+    if perfil_usuario(usuario) not in perfis_permitidos:
+        raise HTTPException(
+            status_code=403,
+            detail="Usuário sem permissão para realizar esta operação"
+        )
+
+
+def exigir_dono_ou_perfil(usuario, usuario_id: int, perfis_permitidos: set):
+    if usuario.id == usuario_id:
+        return
+
+    exigir_perfil(usuario, perfis_permitidos)
 
 
 def resposta_paginada(page: int, limit: int, dados: list):
@@ -219,6 +337,16 @@ def usuario_resposta(usuario):
         "consentimento_lgpd": usuario.consentimento_lgpd
     }
 
+def unidade_resposta(unidade):
+    return {
+        "id": unidade.id,
+        "nome": unidade.nome,
+        "cidade": unidade.cidade,
+        "estado": unidade.estado,
+        "endereco": unidade.endereco,
+        "ativa": unidade.ativa,
+        "data_criacao": unidade.data_criacao
+    }
 
 def produto_resposta(produto):
     return {
@@ -276,6 +404,26 @@ def pagamento_resposta(pagamento):
     }
 
 
+def fidelidade_resposta(fidelidade):
+    return {
+        "id": fidelidade.id,
+        "usuario_id": fidelidade.usuario_id,
+        "pontos": fidelidade.pontos,
+        "data_atualizacao": fidelidade.data_atualizacao
+    }
+
+
+def auditoria_resposta(auditoria):
+    return {
+        "id": auditoria.id,
+        "usuario_id": auditoria.usuario_id,
+        "acao": auditoria.acao,
+        "recurso": auditoria.recurso,
+        "detalhes": auditoria.detalhes,
+        "data_registro": auditoria.data_registro
+    }
+
+
 # =========================
 # BUSCAS NO BANCO
 # =========================
@@ -288,6 +436,13 @@ def buscar_usuario_db(db, usuario_id: int):
 
     return usuario
 
+def buscar_unidade_db(db, unidade_id: int):
+    unidade = db.get(models.Unidade, unidade_id)
+
+    if not unidade:
+        raise HTTPException(status_code=404, detail="Unidade não encontrada")
+
+    return unidade
 
 def buscar_produto_db(db, produto_id: int):
     produto = db.get(models.Produto, produto_id)
@@ -325,6 +480,38 @@ def buscar_pagamento_db(db, pagamento_id: int):
     return pagamento
 
 
+def registrar_auditoria(db, acao: str, recurso: str, detalhes: str, usuario_id: int = None):
+    registro = models.Auditoria(
+        usuario_id=usuario_id,
+        acao=acao,
+        recurso=recurso,
+        detalhes=detalhes,
+        data_registro=agora()
+    )
+
+    db.add(registro)
+
+
+def buscar_ou_criar_fidelidade(db, usuario_id: int):
+    buscar_usuario_db(db, usuario_id)
+
+    fidelidade = db.query(models.Fidelidade).filter(
+        models.Fidelidade.usuario_id == usuario_id
+    ).first()
+
+    if not fidelidade:
+        fidelidade = models.Fidelidade(
+            usuario_id=usuario_id,
+            pontos=0,
+            data_atualizacao=agora()
+        )
+
+        db.add(fidelidade)
+        db.flush()
+
+    return fidelidade
+
+
 def buscar_itens_por_pedido(db, pedido_id: int):
     return db.query(models.ItemPedido).filter(
         models.ItemPedido.pedido_id == pedido_id
@@ -357,6 +544,190 @@ def agrupar_itens_por_pedido(db, pedidos):
 def home():
     return {"mensagem": "API Raízes em pleno funcionamento"}
 
+# =========================
+# AUTH
+# =========================
+
+@app.post("/auth/login", tags=["Auth"], summary="Realizar login")
+def login(dados: schemas.LoginCreate, db=Depends(get_db)):
+    usuario = autenticar_usuario(
+        db=db,
+        email=dados.email,
+        senha=dados.senha
+    )
+
+    token = criar_token_acesso({
+        "sub": str(usuario.id),
+        "email": usuario.email,
+        "perfil": usuario.perfil
+    })
+
+    registrar_auditoria(
+        db=db,
+        usuario_id=usuario.id,
+        acao="LOGIN_REALIZADO",
+        recurso="auth",
+        detalhes=f"Usuário {usuario.id} realizou login"
+    )
+
+    db.commit()
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "usuario": usuario_resposta(usuario)
+    }
+
+
+@app.get("/auth/me", tags=["Auth"], summary="Consultar usuário autenticado")
+def consultar_usuario_logado(usuario=Depends(obter_usuario_logado)):
+    return usuario_resposta(usuario)
+
+# =========================
+# UNIDADES
+# =========================
+
+@app.get("/unidades", tags=["Unidades"], summary="Listar unidades")
+def listar_unidades(
+    ativa: Optional[bool] = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    db=Depends(get_db)
+):
+    offset = calcular_offset(page, limit)
+
+    consulta = db.query(models.Unidade)
+
+    if ativa is not None:
+        consulta = consulta.filter(models.Unidade.ativa == ativa)
+
+    unidades = consulta.offset(offset).limit(limit).all()
+    dados = [unidade_resposta(unidade) for unidade in unidades]
+
+    return resposta_paginada(page, limit, dados)
+
+
+@app.get("/unidades/{unidade_id}", tags=["Unidades"], summary="Buscar unidade por ID")
+def buscar_unidade(unidade_id: int, db=Depends(get_db)):
+    unidade = buscar_unidade_db(db, unidade_id)
+
+    return unidade_resposta(unidade)
+
+
+@app.post("/unidades", tags=["Unidades"], summary="Criar unidade", status_code=201)
+def criar_unidade(
+    unidade: schemas.UnidadeCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
+    if not unidade.nome.strip():
+        raise HTTPException(status_code=400, detail="O nome da unidade é obrigatório")
+
+    if not unidade.cidade.strip():
+        raise HTTPException(status_code=400, detail="A cidade da unidade é obrigatória")
+
+    if not unidade.estado.strip():
+        raise HTTPException(status_code=400, detail="O estado da unidade é obrigatório")
+
+    nova_unidade = models.Unidade(
+        nome=unidade.nome,
+        cidade=unidade.cidade,
+        estado=unidade.estado.upper(),
+        endereco=unidade.endereco,
+        ativa=unidade.ativa,
+        data_criacao=agora()
+    )
+
+    db.add(nova_unidade)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        acao="UNIDADE_CRIADA",
+        recurso="unidades",
+        detalhes=f"Unidade {nova_unidade.id} criada em {nova_unidade.cidade}/{nova_unidade.estado}"
+    )
+
+    db.commit()
+    db.refresh(nova_unidade)
+
+    return {
+        "mensagem": "Unidade criada com sucesso",
+        "unidade": unidade_resposta(nova_unidade)
+    }
+
+
+@app.put("/unidades/{unidade_id}", tags=["Unidades"], summary="Atualizar unidade")
+def atualizar_unidade(
+    unidade_id: int,
+    unidade: schemas.UnidadeCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
+    unidade_db = buscar_unidade_db(db, unidade_id)
+
+    if not unidade.nome.strip():
+        raise HTTPException(status_code=400, detail="O nome da unidade é obrigatório")
+
+    if not unidade.cidade.strip():
+        raise HTTPException(status_code=400, detail="A cidade da unidade é obrigatória")
+
+    if not unidade.estado.strip():
+        raise HTTPException(status_code=400, detail="O estado da unidade é obrigatório")
+
+    unidade_db.nome = unidade.nome
+    unidade_db.cidade = unidade.cidade
+    unidade_db.estado = unidade.estado.upper()
+    unidade_db.endereco = unidade.endereco
+    unidade_db.ativa = unidade.ativa
+
+    registrar_auditoria(
+        db=db,
+        acao="UNIDADE_ATUALIZADA",
+        recurso="unidades",
+        detalhes=f"Unidade {unidade_db.id} atualizada"
+    )
+
+    db.commit()
+    db.refresh(unidade_db)
+
+    return {
+        "mensagem": "Unidade atualizada com sucesso",
+        "unidade": unidade_resposta(unidade_db)
+    }
+
+
+@app.delete("/unidades/{unidade_id}", tags=["Unidades"], summary="Desativar unidade")
+def deletar_unidade(
+    unidade_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
+    unidade = buscar_unidade_db(db, unidade_id)
+
+    unidade.ativa = False
+
+    registrar_auditoria(
+        db=db,
+        acao="UNIDADE_DESATIVADA",
+        recurso="unidades",
+        detalhes=f"Unidade {unidade.id} desativada"
+    )
+
+    db.commit()
+    db.refresh(unidade)
+
+    return {
+        "mensagem": "Unidade desativada com sucesso",
+        "unidade": unidade_resposta(unidade)
+    }
+
 
 # =========================
 # USUÁRIOS
@@ -366,8 +737,11 @@ def home():
 def listar_usuarios(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN"})
+
     offset = calcular_offset(page, limit)
 
     usuarios = db.query(models.Usuario).offset(offset).limit(limit).all()
@@ -377,7 +751,13 @@ def listar_usuarios(
 
 
 @app.get("/usuarios/{usuario_id}", tags=["Usuários"], summary="Buscar usuário por ID")
-def buscar_usuario(usuario_id: int, db=Depends(get_db)):
+def buscar_usuario(
+    usuario_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_dono_ou_perfil(usuario_logado, usuario_id, {"ADMIN"})
+
     usuario = buscar_usuario_db(db, usuario_id)
 
     return usuario_resposta(usuario)
@@ -386,6 +766,14 @@ def buscar_usuario(usuario_id: int, db=Depends(get_db)):
 @app.post("/usuarios", tags=["Usuários"], summary="Criar usuário", status_code=201)
 def criar_usuario(usuario: schemas.UsuarioCreate, db=Depends(get_db)):
     perfil = validar_perfil(usuario.perfil)
+
+    total_usuarios = db.query(models.Usuario).count()
+
+    if total_usuarios > 0 and perfil != "CLIENTE":
+        raise HTTPException(
+            status_code=403,
+            detail="Cadastro público permite apenas perfil CLIENTE"
+        )
 
     usuario_existente = db.query(models.Usuario).filter(
         models.Usuario.email == usuario.email
@@ -403,6 +791,16 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db=Depends(get_db)):
     )
 
     db.add(novo_usuario)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        usuario_id=novo_usuario.id,
+        acao="USUARIO_CRIADO",
+        recurso="usuarios",
+        detalhes=f"Usuário {novo_usuario.id} criado com perfil {perfil}"
+    )
+
     db.commit()
     db.refresh(novo_usuario)
 
@@ -416,10 +814,19 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db=Depends(get_db)):
 def atualizar_usuario(
     usuario_id: int,
     usuario: schemas.UsuarioCreate,
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_dono_ou_perfil(usuario_logado, usuario_id, {"ADMIN"})
+
     usuario_db = buscar_usuario_db(db, usuario_id)
     perfil = validar_perfil(usuario.perfil)
+
+    if perfil_usuario(usuario_logado) != "ADMIN" and perfil != usuario_db.perfil:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas ADMIN pode alterar o perfil do usuário"
+        )
 
     email_em_uso = db.query(models.Usuario).filter(
         models.Usuario.email == usuario.email,
@@ -438,6 +845,14 @@ def atualizar_usuario(
     usuario_db.perfil = perfil
     usuario_db.consentimento_lgpd = usuario.consentimento_lgpd
 
+    registrar_auditoria(
+        db=db,
+        usuario_id=usuario_db.id,
+        acao="USUARIO_ATUALIZADO",
+        recurso="usuarios",
+        detalhes=f"Usuário {usuario_db.id} atualizado"
+    )
+
     db.commit()
     db.refresh(usuario_db)
 
@@ -448,8 +863,22 @@ def atualizar_usuario(
 
 
 @app.delete("/usuarios/{usuario_id}", tags=["Usuários"], summary="Deletar usuário")
-def deletar_usuario(usuario_id: int, db=Depends(get_db)):
+def deletar_usuario(
+    usuario_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN"})
+
     usuario = buscar_usuario_db(db, usuario_id)
+
+    registrar_auditoria(
+        db=db,
+        usuario_id=usuario.id,
+        acao="USUARIO_DELETADO",
+        recurso="usuarios",
+        detalhes=f"Usuário {usuario.id} deletado"
+    )
 
     db.delete(usuario)
     db.commit()
@@ -492,8 +921,15 @@ def buscar_produto(produto_id: int, db=Depends(get_db)):
 
 
 @app.post("/produtos", tags=["Produtos"], summary="Criar produto", status_code=201)
-def criar_produto(produto: schemas.ProdutoCreate, db=Depends(get_db)):
+def criar_produto(
+    produto: schemas.ProdutoCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     validar_unidade(produto.unidade_id)
+    buscar_unidade_db(db, produto.unidade_id)
     validar_preco(produto.preco)
 
     novo_produto = models.Produto(
@@ -506,6 +942,15 @@ def criar_produto(produto: schemas.ProdutoCreate, db=Depends(get_db)):
     )
 
     db.add(novo_produto)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        acao="PRODUTO_CRIADO",
+        recurso="produtos",
+        detalhes=f"Produto {novo_produto.id} criado na unidade {produto.unidade_id}"
+    )
+
     db.commit()
     db.refresh(novo_produto)
 
@@ -519,11 +964,15 @@ def criar_produto(produto: schemas.ProdutoCreate, db=Depends(get_db)):
 def atualizar_produto(
     produto_id: int,
     produto: schemas.ProdutoCreate,
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     produto_db = buscar_produto_db(db, produto_id)
 
     validar_unidade(produto.unidade_id)
+    buscar_unidade_db(db, produto.unidade_id)
     validar_preco(produto.preco)
 
     produto_db.unidade_id = produto.unidade_id
@@ -532,6 +981,13 @@ def atualizar_produto(
     produto_db.preco = produto.preco
     produto_db.categoria = normalizar(produto.categoria)
     produto_db.ativo = produto.ativo
+
+    registrar_auditoria(
+        db=db,
+        acao="PRODUTO_ATUALIZADO",
+        recurso="produtos",
+        detalhes=f"Produto {produto_db.id} atualizado"
+    )
 
     db.commit()
     db.refresh(produto_db)
@@ -543,8 +999,21 @@ def atualizar_produto(
 
 
 @app.delete("/produtos/{produto_id}", tags=["Produtos"], summary="Deletar produto")
-def deletar_produto(produto_id: int, db=Depends(get_db)):
+def deletar_produto(
+    produto_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     produto = buscar_produto_db(db, produto_id)
+
+    registrar_auditoria(
+        db=db,
+        acao="PRODUTO_DELETADO",
+        recurso="produtos",
+        detalhes=f"Produto {produto.id} deletado"
+    )
 
     db.delete(produto)
     db.commit()
@@ -562,8 +1031,11 @@ def listar_estoque(
     produto_id: Optional[int] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     offset = calcular_offset(page, limit)
     consulta = db.query(models.Estoque)
 
@@ -580,15 +1052,28 @@ def listar_estoque(
 
 
 @app.get("/estoque/{estoque_id}", tags=["Estoque"], summary="Buscar estoque por ID")
-def buscar_estoque(estoque_id: int, db=Depends(get_db)):
+def buscar_estoque(
+    estoque_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     estoque = buscar_estoque_db(db, estoque_id)
 
     return estoque_resposta(estoque)
 
 
 @app.post("/estoque", tags=["Estoque"], summary="Cadastrar estoque", status_code=201)
-def criar_estoque(estoque: schemas.EstoqueCreate, db=Depends(get_db)):
+def criar_estoque(
+    estoque: schemas.EstoqueCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     validar_unidade(estoque.unidade_id)
+    buscar_unidade_db(db, estoque.unidade_id)
     buscar_produto_db(db, estoque.produto_id)
 
     if estoque.quantidade < 0:
@@ -616,6 +1101,15 @@ def criar_estoque(estoque: schemas.EstoqueCreate, db=Depends(get_db)):
     )
 
     db.add(novo_estoque)
+    db.flush()
+
+    registrar_auditoria(
+        db=db,
+        acao="ESTOQUE_CRIADO",
+        recurso="estoque",
+        detalhes=f"Estoque {novo_estoque.id} criado para produto {estoque.produto_id} com quantidade {estoque.quantidade}"
+    )
+
     db.commit()
     db.refresh(novo_estoque)
 
@@ -629,11 +1123,15 @@ def criar_estoque(estoque: schemas.EstoqueCreate, db=Depends(get_db)):
 def atualizar_estoque(
     estoque_id: int,
     estoque: schemas.EstoqueCreate,
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     estoque_db = buscar_estoque_db(db, estoque_id)
 
     validar_unidade(estoque.unidade_id)
+    buscar_unidade_db(db, estoque.unidade_id)
     buscar_produto_db(db, estoque.produto_id)
 
     if estoque.quantidade < 0:
@@ -659,6 +1157,13 @@ def atualizar_estoque(
     estoque_db.quantidade = estoque.quantidade
     estoque_db.data_atualizacao = agora()
 
+    registrar_auditoria(
+        db=db,
+        acao="ESTOQUE_ATUALIZADO",
+        recurso="estoque",
+        detalhes=f"Estoque {estoque_db.id} atualizado para quantidade {estoque.quantidade}"
+    )
+
     db.commit()
     db.refresh(estoque_db)
 
@@ -669,8 +1174,21 @@ def atualizar_estoque(
 
 
 @app.delete("/estoque/{estoque_id}", tags=["Estoque"], summary="Deletar estoque")
-def deletar_estoque(estoque_id: int, db=Depends(get_db)):
+def deletar_estoque(
+    estoque_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
     estoque = buscar_estoque_db(db, estoque_id)
+
+    registrar_auditoria(
+        db=db,
+        acao="ESTOQUE_DELETADO",
+        recurso="estoque",
+        detalhes=f"Estoque {estoque.id} deletado"
+    )
 
     db.delete(estoque)
     db.commit()
@@ -688,8 +1206,11 @@ def listar_pedidos(
     canalPedido: Optional[str] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     offset = calcular_offset(page, limit)
     consulta = db.query(models.Pedido)
 
@@ -713,17 +1234,40 @@ def listar_pedidos(
 
 
 @app.get("/pedidos/{pedido_id}", tags=["Pedidos"], summary="Buscar pedido por ID")
-def buscar_pedido(pedido_id: int, db=Depends(get_db)):
+def buscar_pedido(
+    pedido_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
     pedido = buscar_pedido_db(db, pedido_id)
+
+    if pedido.usuario_id != usuario_logado.id:
+        exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     itens = buscar_itens_por_pedido(db, pedido.id)
 
     return pedido_resposta(pedido, itens)
 
 
 @app.post("/pedidos", tags=["Pedidos"], summary="Criar pedido", status_code=201)
-def criar_pedido(pedido: schemas.PedidoCreate, db=Depends(get_db)):
+def criar_pedido(
+    pedido: schemas.PedidoCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    if pedido.usuario_id != usuario_logado.id:
+        exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     buscar_usuario_db(db, pedido.usuario_id)
     validar_unidade(pedido.unidade_id)
+
+    unidade = buscar_unidade_db(db, pedido.unidade_id)
+
+    if not unidade.ativa:
+        raise HTTPException(
+            status_code=409,
+            detail="A unidade informada está inativa"
+        )
 
     canal = validar_canal(pedido.canalPedido)
     forma_pagamento = validar_forma_pagamento(pedido.formaPagamento)
@@ -833,6 +1377,14 @@ def criar_pedido(pedido: schemas.PedidoCreate, db=Depends(get_db)):
         db.add(item_pedido)
         itens_criados.append(item_pedido)
 
+    registrar_auditoria(
+        db=db,
+        usuario_id=pedido.usuario_id,
+        acao="PEDIDO_CRIADO",
+        recurso="pedidos",
+        detalhes=f"Pedido {novo_pedido.id} criado no canal {canal} com valor total {valor_total}"
+    )
+
     db.commit()
     db.refresh(novo_pedido)
 
@@ -846,8 +1398,11 @@ def criar_pedido(pedido: schemas.PedidoCreate, db=Depends(get_db)):
 def atualizar_status_pedido(
     pedido_id: int,
     dados: schemas.PedidoStatusUpdate,
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     pedido = buscar_pedido_db(db, pedido_id)
     novo_status = validar_status_pedido(dados.status)
 
@@ -885,6 +1440,14 @@ def atualizar_status_pedido(
 
     pedido.status = novo_status
 
+    registrar_auditoria(
+        db=db,
+        usuario_id=pedido.usuario_id,
+        acao="STATUS_PEDIDO_ALTERADO",
+        recurso="pedidos",
+        detalhes=f"Pedido {pedido.id} alterado para o status {novo_status}"
+    )
+
     db.commit()
     db.refresh(pedido)
 
@@ -902,8 +1465,11 @@ def atualizar_status_pedido(
 def listar_pagamentos(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
+    usuario_logado=Depends(obter_usuario_logado),
     db=Depends(get_db)
 ):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     offset = calcular_offset(page, limit)
 
     pagamentos = db.query(models.Pagamento).offset(offset).limit(limit).all()
@@ -913,14 +1479,26 @@ def listar_pagamentos(
 
 
 @app.get("/pagamentos/{pagamento_id}", tags=["Pagamentos"], summary="Buscar pagamento por ID")
-def buscar_pagamento(pagamento_id: int, db=Depends(get_db)):
+def buscar_pagamento(
+    pagamento_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     pagamento = buscar_pagamento_db(db, pagamento_id)
 
     return pagamento_resposta(pagamento)
 
 
 @app.post("/pagamentos", tags=["Pagamentos"], summary="Processar pagamento mock", status_code=201)
-def processar_pagamento(pagamento: schemas.PagamentoCreate, db=Depends(get_db)):
+def processar_pagamento(
+    pagamento: schemas.PagamentoCreate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE", "ATENDENTE"})
+
     pedido = buscar_pedido_db(db, pagamento.pedido_id)
 
     forma_pagamento = validar_forma_pagamento(pagamento.forma_pagamento)
@@ -940,12 +1518,37 @@ def processar_pagamento(pagamento: schemas.PagamentoCreate, db=Depends(get_db)):
         data_pagamento=agora()
     )
 
+    pontos_gerados = 0
+
     if status_pagamento == "APROVADO":
         pedido.status = "PAGO"
         mensagem = "Pagamento aprovado com sucesso"
+
+        fidelidade = buscar_ou_criar_fidelidade(db, pedido.usuario_id)
+
+        pontos_gerados = int(pedido.valor_total)
+        fidelidade.pontos += pontos_gerados
+        fidelidade.data_atualizacao = agora()
+
+        registrar_auditoria(
+            db=db,
+            usuario_id=pedido.usuario_id,
+            acao="PAGAMENTO_APROVADO",
+            recurso="pagamentos",
+            detalhes=f"Pagamento aprovado para o pedido {pedido.id}. Pontos gerados: {pontos_gerados}"
+        )
+
     else:
         pedido.status = "PAGAMENTO_RECUSADO"
         mensagem = "Pagamento recusado"
+
+        registrar_auditoria(
+            db=db,
+            usuario_id=pedido.usuario_id,
+            acao="PAGAMENTO_RECUSADO",
+            recurso="pagamentos",
+            detalhes=f"Pagamento recusado para o pedido {pedido.id}"
+        )
 
     db.add(novo_pagamento)
     db.commit()
@@ -957,5 +1560,99 @@ def processar_pagamento(pagamento: schemas.PagamentoCreate, db=Depends(get_db)):
     return {
         "mensagem": mensagem,
         "pagamento": pagamento_resposta(novo_pagamento),
+        "pontos_gerados": pontos_gerados,
         "pedido": pedido_resposta(pedido, itens)
     }
+
+
+# =========================
+# FIDELIDADE
+# =========================
+
+@app.get("/fidelidade/{usuario_id}", tags=["Fidelidade"], summary="Consultar pontos de fidelidade")
+def consultar_fidelidade(
+    usuario_id: int,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_dono_ou_perfil(usuario_logado, usuario_id, {"ADMIN", "GERENTE", "ATENDENTE"})
+
+    fidelidade = buscar_ou_criar_fidelidade(db, usuario_id)
+
+    db.commit()
+    db.refresh(fidelidade)
+
+    return fidelidade_resposta(fidelidade)
+
+
+@app.post("/fidelidade/resgatar", tags=["Fidelidade"], summary="Resgatar pontos de fidelidade")
+def resgatar_pontos(
+    dados: schemas.FidelidadeResgate,
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_dono_ou_perfil(usuario_logado, dados.usuario_id, {"ADMIN", "GERENTE", "ATENDENTE"})
+
+    if dados.pontos <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="A quantidade de pontos para resgate deve ser maior que zero"
+        )
+
+    fidelidade = buscar_ou_criar_fidelidade(db, dados.usuario_id)
+
+    if fidelidade.pontos < dados.pontos:
+        raise HTTPException(
+            status_code=409,
+            detail="Saldo de pontos insuficiente"
+        )
+
+    fidelidade.pontos -= dados.pontos
+    fidelidade.data_atualizacao = agora()
+
+    registrar_auditoria(
+        db=db,
+        usuario_id=dados.usuario_id,
+        acao="PONTOS_RESGATADOS",
+        recurso="fidelidade",
+        detalhes=f"Usuário {dados.usuario_id} resgatou {dados.pontos} pontos"
+    )
+
+    db.commit()
+    db.refresh(fidelidade)
+
+    return {
+        "mensagem": "Pontos resgatados com sucesso",
+        "fidelidade": fidelidade_resposta(fidelidade)
+    }
+
+
+# =========================
+# AUDITORIA
+# =========================
+
+@app.get("/auditoria", tags=["Auditoria"], summary="Listar registros de auditoria")
+def listar_auditoria(
+    usuario_id: Optional[int] = None,
+    acao: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    usuario_logado=Depends(obter_usuario_logado),
+    db=Depends(get_db)
+):
+    exigir_perfil(usuario_logado, {"ADMIN", "GERENTE"})
+
+    offset = calcular_offset(page, limit)
+
+    consulta = db.query(models.Auditoria)
+
+    if usuario_id is not None:
+        consulta = consulta.filter(models.Auditoria.usuario_id == usuario_id)
+
+    if acao is not None:
+        consulta = consulta.filter(models.Auditoria.acao == acao.upper())
+
+    registros = consulta.order_by(models.Auditoria.id.desc()).offset(offset).limit(limit).all()
+    dados = [auditoria_resposta(registro) for registro in registros]
+
+    return resposta_paginada(page, limit, dados)

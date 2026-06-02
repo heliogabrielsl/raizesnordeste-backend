@@ -40,3 +40,23 @@ class PagamentoCreate(BaseModel):
     pedido_id: int
     forma_pagamento: str = "MOCK"
     status_pagamento: str
+
+class FidelidadeResgate(BaseModel):
+    usuario_id: int
+    pontos: int
+
+class UnidadeCreate(BaseModel):
+    nome: str
+    cidade: str
+    estado: str
+    endereco: str
+    ativa: bool = True
+
+class LoginCreate(BaseModel):
+    email: str
+    senha: str
+
+
+
+
+

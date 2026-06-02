@@ -69,3 +69,32 @@ class Pagamento(Base):
     status_pagamento = Column(String)
     valor = Column(Float)
     data_pagamento = Column(DateTime, default=datetime.utcnow)
+
+class Fidelidade(Base):
+    __tablename__ = "fidelidade"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer)
+    pontos = Column(Integer, default=0)
+    data_atualizacao = Column(DateTime, default=datetime.utcnow)
+
+class Auditoria(Base):
+    __tablename__ = "auditoria"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, nullable=True)
+    acao = Column(String)
+    recurso = Column(String)
+    detalhes = Column(String)
+    data_registro = Column(DateTime, default=datetime.utcnow)
+
+class Unidade(Base):
+    __tablename__ = "unidades"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String)
+    cidade = Column(String)
+    estado = Column(String)
+    endereco = Column(String)
+    ativa = Column(Boolean, default=True)
+    data_criacao = Column(DateTime, default=datetime.utcnow)
