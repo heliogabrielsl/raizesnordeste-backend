@@ -117,19 +117,19 @@ Exemplo de erro de permissão:
 }
 ```
 
-### Criação de usuário administrador
+### Criação do primeiro administrador
 
-Por segurança, o cadastro público de usuários deve ser usado inicialmente para criar um usuário com perfil comum, como `CLIENTE`.
+Quando o banco de dados está vazio, o primeiro usuário pode ser criado com qualquer perfil.
 
 Exemplo:
 
 ```json
 {
-  "nome": "Admin",
+  "nome": "Administrador",
   "email": "admin@gmail.com",
   "senha": "123456",
-  "perfil": "CLIENTE",
-  "consentimento_lgpd": false
+  "perfil": "ADMIN",
+  "consentimento_lgpd": true
 }
 ```
 
@@ -292,6 +292,20 @@ Exemplo de criação de pedido:
 ```
 
 Ao criar o pedido, o sistema calcula o valor total e reduz a quantidade do estoque.
+
+```md
+Status de pedido disponíveis:
+
+- CRIADO
+- AGUARDANDO_PAGAMENTO
+- PAGO
+- PAGAMENTO_RECUSADO
+- EM_PREPARO
+- PRONTO
+- ENTREGUE
+- CANCELADO
+
+```
 
 ### Pagamentos
 
