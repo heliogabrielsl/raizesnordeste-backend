@@ -1,0 +1,369 @@
+type: collection.insomnia.rest/5.0
+schema_version: "5.1"
+name: Raízes API
+meta:
+  id: wrk_bbe4abd0e51d4fa685f4835ccba08a57
+  created: 1780518741907
+  modified: 1780518741907
+  description: ""
+collection:
+  - url: http://127.0.0.1:8000/pedidos
+    name: T10 - Estoque insuficiente
+    meta:
+      id: req_06ef1aa018d84ff9a8f5401f9904f7cb
+      created: 1780518863999
+      modified: 1780522484470
+      isPrivate: false
+      description: ""
+      sortKey: -1780518863999
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "usuario_id": 17,
+          "unidade_id": 1,
+          "canalPedido": "APP",
+          "itens": [
+            {
+              "produto_id": 1,
+              "quantidade": 999
+            }
+          ],
+          "formaPagamento": "MOCK"
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNCIsImVtYWlsIjoiYWRtaW5AZ21haWwuY29tIiwicGVyZmlsIjoiQURNSU4iLCJleHAiOjE3ODA1MjU5ODN9.3dexrO5THP6NygUx44usP2U4hho6K-CDrpC_lYSAbtM
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/usuarios
+    name: T09 - Usuário duplicado
+    meta:
+      id: req_4e331e070cb840a4895d66d5a03a70c0
+      created: 1780520680544
+      modified: 1780521999923
+      isPrivate: false
+      description: ""
+      sortKey: -1780520680544
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "nome": "Sofia",
+          "email": "sofia@gmail.com",
+          "senha": "123456",
+          "perfil": "CLIENTE",
+          "consentimento_lgpd": true
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/auth/me
+    name: T08 - Acesso sem token
+    meta:
+      id: req_8553dba2c15749dbba219bb78ff483cf
+      created: 1780520682192
+      modified: 1780521950526
+      isPrivate: false
+      description: ""
+      sortKey: -1780520682192
+    method: GET
+    headers:
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      disabled: true
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/auth/login
+    name: T07 - Login inválido
+    meta:
+      id: req_9448b7ddfcde4f3d8eaf5e0e2647329d
+      created: 1780520688595
+      modified: 1780522031637
+      isPrivate: false
+      description: ""
+      sortKey: -1780520688595
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "email": "sofia@gmail.com",
+          "senha": "senha_errada"
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/pedidos/6
+    name: T06 - Consultar auditoria
+    meta:
+      id: req_10bf614f1dcd491c9f3dd545c40deeb5
+      created: 1780520689461
+      modified: 1780522730808
+      isPrivate: false
+      description: ""
+      sortKey: -1780520689461
+    method: GET
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "id": 6,
+          "usuario_id": 17,
+          "unidade_id": 1,
+          "status": "PAGO",
+          "valor_total": 30.0
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNCIsImVtYWlsIjoiYWRtaW5AZ21haWwuY29tIiwicGVyZmlsIjoiQURNSU4iLCJleHAiOjE3ODA1MjU5ODN9.3dexrO5THP6NygUx44usP2U4hho6K-CDrpC_lYSAbtM
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/pagamentos
+    name: T05 - Pagamento aprovado
+    meta:
+      id: req_da1ab1cb8b754868ade07e7ef46326b3
+      created: 1780520690389
+      modified: 1780522623454
+      isPrivate: false
+      description: ""
+      sortKey: -1780520690389
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "pedido_id": 6,
+          "forma_pagamento": "MOCK",
+          "status_pagamento": "APROVADO"
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNCIsImVtYWlsIjoiYWRtaW5AZ21haWwuY29tIiwicGVyZmlsIjoiQURNSU4iLCJleHAiOjE3ODA1MjU5ODN9.3dexrO5THP6NygUx44usP2U4hho6K-CDrpC_lYSAbtM
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/pedidos
+    name: T04 - Criar pedido válido
+    meta:
+      id: req_272b718cb80e42dcbc8ae36c7cb5a3ae
+      created: 1780520691142
+      modified: 1780522458159
+      isPrivate: false
+      description: ""
+      sortKey: -1780520691142
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "usuario_id": 17,
+          "unidade_id": 1,
+          "canalPedido": "APP",
+          "itens": [
+            {
+              "produto_id": 1,
+              "quantidade": 2
+            }
+          ],
+          "formaPagamento": "MOCK"
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      disabled: false
+      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNCIsImVtYWlsIjoiYWRtaW5AZ21haWwuY29tIiwicGVyZmlsIjoiQURNSU4iLCJleHAiOjE3ODA1MjU5ODN9.3dexrO5THP6NygUx44usP2U4hho6K-CDrpC_lYSAbtM
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/usuarios
+    name: T03 - Criar usuário válido
+    meta:
+      id: req_1369fe30bb2647b1a9d7dd53038b6d39
+      created: 1780520691747
+      modified: 1780521758669
+      isPrivate: false
+      description: ""
+      sortKey: -1780520691747
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "nome": "Sofia ",
+          "email": "sofia@gmail.com",
+          "senha": "123456",
+          "perfil": "CLIENTE",
+          "consentimento_lgpd": true
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/auth/me
+    name: T02 - Consultar usuário autenticado
+    meta:
+      id: req_c99f28da44e64ff0b997691ca42a42c5
+      created: 1780520692389
+      modified: 1780521868345
+      isPrivate: false
+      description: ""
+      sortKey: -1780520692389
+    method: GET
+    headers:
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    authentication:
+      type: bearer
+      token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxNyIsImVtYWlsIjoic29maWFAZ21haWwuY29tIiwicGVyZmlsIjoiQ0xJRU5URSIsImV4cCI6MTc4MDUyNTQwOH0.n4On9CMcDO4nqVJh0VOm1w9jWHsVc7Tzbucdr8M74Kc
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+  - url: http://127.0.0.1:8000/auth/login
+    name: T01 - Login válido
+    meta:
+      id: req_ae1e551c7d2b4561abf077cbe086ca8b
+      created: 1780520697451
+      modified: 1780521806964
+      isPrivate: false
+      description: ""
+      sortKey: -1780520697451
+    method: POST
+    body:
+      mimeType: application/json
+      text: |-
+        {
+          "email": "sofia@gmail.com",
+          "senha": "123456"
+        }
+    headers:
+      - name: Content-Type
+        value: application/json
+      - name: User-Agent
+        value: insomnia/12.6.0
+        description: ""
+        disabled: false
+    settings:
+      renderRequestBody: true
+      encodeUrl: true
+      followRedirects: global
+      cookies:
+        send: true
+        store: true
+      rebuildPath: true
+cookieJar:
+  name: Default Jar
+  meta:
+    id: jar_46b791828023fcefa293750b148427fd348220bc
+    created: 1780518741910
+    modified: 1780518741910
+environments:
+  name: Base Environment
+  meta:
+    id: env_46b791828023fcefa293750b148427fd348220bc
+    created: 1780518741908
+    modified: 1780518741908
+    isPrivate: false
